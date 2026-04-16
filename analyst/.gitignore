@@ -1,0 +1,60 @@
+# ── Dependencies ──────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Next.js ───────────────────────────────────────────────────────
+.next/
+out/
+
+# ── Environment variables ─────────────────────────────────────────
+# NEVER commit these — use .env.example instead
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ── Build outputs ─────────────────────────────────────────────────
+dist/
+build/
+
+# ── Debug logs ────────────────────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ── OS files ──────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Editor files ──────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── TypeScript ────────────────────────────────────────────────────
+*.tsbuildinfo
+next-env.d.ts
+
+# ── Testing ───────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Misc ──────────────────────────────────────────────────────────
+*.pem
+.vercel
+fix-responsive.js

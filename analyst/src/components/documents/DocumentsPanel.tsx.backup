@@ -1,0 +1,419 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
+import { useAppStore } from '@/lib/store';
+import type { Document } from '@/types';
+import {
+  Upload, FileText, FileSpreadsheet, File, Trash2,
+  CheckCircle2, AlertCircle, Loader2, Search, RefreshCw,
+  BarChart2, X, TrendingUp, Brain,
+} from 'lucide-react';
+import { cn } from '@/lib/utils/cn';
+import { formatDistanceToNow } from 'date-fns';
+import toast from 'react-hot-toast';
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis,
+  Tooltip, ResponsiveContainer, Cell,
+} from 'recharts';
+
+const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+const FILE_ICONS: Record<string, React.ReactNode> = {
+  pdf:  <FileText size={16} className="text-red-500" />,
+  csv:  <FileSpreadsheet size={16} className="text-green-500" />,
+  docx: <FileText size={16} className="text-blue-500" />,
+  txt:  <File size={16} className="text-gray-400" />,
+  md:   <File size={16} className="text-purple-500" />,
+};
+
+const STATUS_ICONS: Record<Document['status'], React.ReactNode> = {
+  pending:    <Loader2 size={13} className="animate-spin text-gray-400" />,
+  processing: <Loader2 size={13} className="animate-spin text-brand-500" />,
+  ready:      <CheckCircle2 size={13} className="text-green-500" />,
+  error:      <AlertCircle size={13} className="text-red-500" />,
+};
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+interface CSVStats {
+  rows: number;
+  cols: number;
+  numeric: number;
+  headers: string[];
+}
+
+function CSVDashboard({ doc, onClose }: { doc: Document; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<CSVStats | null>(null);
+  const [barData, setBarData] = useState<{ name: string; value: number }[]>([]);
+  const [lineData, setLineData] = useState<{ name: string; value: number }[]>([]);
+  const [activeTab, setActiveTab] = useState<'bar' | 'line'>('bar');
+  const [colLabel, setColLabel] = useState('');
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await fetch('/api/ingest/csv?documentId=' + doc.id);
+        if (res.status !== 200) { setLoading(false); return; }
+        const json = await res.json();
+        const text = json.content as string;
+        const lines = text.split('\n').filter(function(l) { return l.trim(); });
+        const headers = lines[0].split(',').map(function(h) { return h.trim().replace(/"/g, ''); });
+        const rows = lines.slice(1).map(function(line) {
+          return line.split(',').map(function(v) { return v.trim().replace(/"/g, ''); });
+        });
+
+        const numericCols = headers.filter(function(h, i) {
+          const vals = rows.map(function(r) { return r[i]; }).filter(Boolean);
+          const numCount = vals.filter(function(v) { return !isNaN(Number(v)) && v !== ''; }).length;
+          return numCount > vals.length * 0.7;
+        });
+
+        setStats({ rows: rows.length, cols: headers.length, numeric: numericCols.length, headers });
+
+        if (numericCols[0]) {
+          const idx = headers.indexOf(numericCols[0]);
+          setColLabel(numericCols[0]);
+          const chartRows = rows.slice(0, 20);
+          setBarData(chartRows.map(function(row, i) {
+            return { name: String(i + 1), value: Number(row[idx]) || 0 };
+          }));
+          setLineData(rows.slice(0, 50).map(function(row, i) {
+            return { name: String(i + 1), value: Number(row[idx]) || 0 };
+          }));
+        }
+      } catch (e) {
+        console.error('CSV load error:', e);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [doc.id]);
+
+  return (
+    <div className="rounded-2xl border border-white/20 bg-white/60 dark:bg-white/5 backdrop-blur-xl p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BarChart2 size={15} className="text-brand-500" />
+          <p className="font-semibold text-sm">Data Analytics Dashboard</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-400">{doc.name}</span>
+          <button onClick={onClose} className="p-1 rounded text-gray-400 hover:text-red-500 transition-colors">
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8 gap-2 text-gray-400">
+          <Loader2 size={16} className="animate-spin" />
+          <span className="text-sm">Loading CSV data...</span>
+        </div>
+      ) : stats ? (
+        <>
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              { label: 'Total rows', value: stats.rows, color: 'text-brand-500' },
+              { label: 'Columns', value: stats.cols, color: 'text-green-500' },
+              { label: 'Numeric cols', value: stats.numeric, color: 'text-amber-500' },
+              { label: 'Text cols', value: stats.cols - stats.numeric, color: 'text-purple-500' },
+            ].map(s => (
+              <div key={s.label} className="rounded-xl bg-white/40 dark:bg-white/5 border border-white/20 p-3 text-center hover-lift">
+                <p className={cn('text-xl font-bold', s.color)}>{s.value}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5 uppercase tracking-wide">{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {barData.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <TrendingUp size={11} /> {colLabel} — first {barData.length} rows
+                </p>
+                <div className="flex gap-1">
+                  {(['bar', 'line'] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setActiveTab(t)}
+                      className={cn(
+                        'px-2 py-0.5 rounded text-xs transition-all capitalize',
+                        activeTab === t
+                          ? 'bg-brand-500 text-white'
+                          : 'text-gray-400 hover:text-gray-600'
+                      )}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <ResponsiveContainer width="100%" height={180}>
+                {activeTab === 'bar' ? (
+                  <BarChart data={barData}>
+                    <XAxis dataKey="name" tick={{ fontSize: 9 }} />
+                    <YAxis tick={{ fontSize: 9 }} />
+                    <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, background: 'rgba(255,255,255,0.95)' }} />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                      {barData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Bar>
+                  </BarChart>
+                ) : (
+                  <LineChart data={lineData}>
+                    <XAxis dataKey="name" tick={{ fontSize: 9 }} />
+                    <YAxis tick={{ fontSize: 9 }} />
+                    <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, background: 'rgba(255,255,255,0.95)' }} />
+                    <Line type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} dot={false} />
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs text-gray-400 mb-1 uppercase tracking-wide">Columns detected</p>
+            <div className="flex flex-wrap gap-1.5">
+              {stats.headers.map(h => (
+                <span key={h} className="text-xs px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-600 dark:text-brand-400">
+                  {h}
+                </span>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-gray-400 text-center py-4">Could not load CSV data</p>
+      )}
+    </div>
+  );
+}
+
+export default function DocumentsPanel() {
+  const { documents, setDocuments, addDocument, removeDocument } = useAppStore();
+  const [uploading, setUploading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [selectedCSV, setSelectedCSV] = useState<Document | null>(null);
+
+  async function loadDocuments() {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/ingest');
+      if (res.ok) {
+        const { documents: docs } = await res.json();
+        setDocuments(docs ?? []);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadDocuments(); }, []);
+
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (!acceptedFiles.length) return;
+    setUploading(true);
+    const formData = new FormData();
+    acceptedFiles.forEach(f => formData.append('files', f));
+    const toastId = toast.loading('Ingesting ' + acceptedFiles.length + ' file(s)...');
+    try {
+      const res = await fetch('/api/ingest', { method: 'POST', body: formData });
+      const { results } = await res.json();
+      let ok = 0, failed = 0;
+      results.forEach((r: { status: string; name: string }) => {
+        if (r.status === 'ready') ok++; else failed++;
+      });
+      toast.success(ok + ' file(s) ingested' + (failed ? ', ' + failed + ' failed' : ''), { id: toastId });
+      await loadDocuments();
+      // Auto-open CSV dashboard if a CSV was uploaded
+      const csvResult = results.find((r: { status: string; name: string }) =>
+        r.name && r.name.endsWith('.csv') && r.status === 'ready'
+      );
+      if (csvResult) {
+        setTimeout(() => {
+          const csvDocs = documents.filter(d => d.type === 'csv' && d.status === 'ready');
+          if (csvDocs.length > 0) setSelectedCSV(csvDocs[0]);
+        }, 500);
+      }
+    } catch {
+      toast.error('Upload failed', { id: toastId });
+    } finally {
+      setUploading(false);
+    }
+  }, [documents]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'text/plain': ['.txt'],
+      'text/markdown': ['.md'],
+      'text/csv': ['.csv'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+    },
+    multiple: true,
+  });
+
+  async function deleteDocument(id: string, name: string) {
+    if (!confirm('Delete "' + name + '"?')) return;
+    await fetch('/api/ingest', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentId: id }),
+    });
+    removeDocument(id);
+    if (selectedCSV?.id === id) setSelectedCSV(null);
+    toast.success('Document deleted');
+  }
+
+  const filtered = documents.filter(d =>
+    d.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const stats = {
+    total: documents.length,
+    ready: documents.filter(d => d.status === 'ready').length,
+    chunks: documents.reduce((sum, d) => sum + (d.chunkCount ?? 0), 0),
+  };
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+        {/* Stats bar */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Documents', value: stats.total },
+            { label: 'Ready for search', value: stats.ready },
+            { label: 'Total chunks', value: stats.chunks.toLocaleString() },
+          ].map(stat => (
+            <div key={stat.label} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-surface-0 p-4 hover-lift">
+              <p className="text-2xl font-bold text-brand-500">{stat.value}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Drop zone */}
+        <div
+          {...getRootProps()}
+          className={cn(
+            'relative flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-10 transition-all cursor-pointer',
+            isDragActive
+              ? 'border-brand-500 bg-brand-500/5'
+              : 'border-gray-200 dark:border-gray-700 hover:border-brand-500/50 hover:bg-surface-2'
+          )}
+        >
+          <input {...getInputProps()} />
+          <div className={cn('rounded-2xl p-4 mb-4 transition-colors', isDragActive ? 'bg-brand-500/20' : 'bg-surface-2')}>
+            {uploading
+              ? <Loader2 size={28} className="text-brand-500 animate-spin" />
+              : <Upload size={28} className={isDragActive ? 'text-brand-500' : 'text-gray-400'} />
+            }
+          </div>
+          <p className="font-medium text-gray-700 dark:text-gray-300">
+            {isDragActive ? 'Drop files here' : 'Drag & drop files or click to browse'}
+          </p>
+          <p className="text-sm text-gray-400 mt-1">PDF, TXT, MD, CSV, DOCX up to 50MB</p>
+          <p className="text-xs text-brand-500 mt-2">CSV files will auto-generate analytics charts</p>
+        </div>
+
+        {/* CSV Analytics Dashboard */}
+        {selectedCSV && (
+          <CSVDashboard doc={selectedCSV} onClose={() => setSelectedCSV(null)} />
+        )}
+
+        {/* Document library */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold text-sm">Document Library</h2>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search documents..."
+                  className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-0 focus:outline-none focus:ring-1 focus:ring-brand-500 w-48"
+                />
+              </div>
+              <button
+                onClick={loadDocuments}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-surface-2 transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">
+              <File size={36} className="mx-auto mb-2 opacity-30" />
+              <p className="text-sm">{search ? 'No documents match your search' : 'No documents uploaded yet'}</p>
+              <p className="text-xs mt-1">Upload PDF, DOCX, TXT, or CSV files above</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filtered.map(doc => (
+                <div
+                  key={doc.id}
+                  onClick={() => {
+                    if (doc.type === 'csv' && doc.status === 'ready') {
+                      setSelectedCSV(prev => prev?.id === doc.id ? null : doc);
+                    }
+                  }}
+                  className={cn(
+                    'flex items-center gap-3 rounded-xl border bg-surface-0 p-3 transition-all',
+                    doc.type === 'csv' && doc.status === 'ready'
+                      ? 'cursor-pointer hover-lift hover:border-brand-500/50'
+                      : 'hover-lift',
+                    selectedCSV?.id === doc.id
+                      ? 'border-brand-500 bg-brand-500/5'
+                      : 'border-gray-200 dark:border-gray-700'
+                  )}
+                >
+                  <div className="flex-shrink-0">{FILE_ICONS[doc.type] ?? <File size={16} />}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{doc.name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {formatBytes(doc.size)} · {doc.chunkCount ?? 0} chunks ·{' '}
+                      {formatDistanceToNow(new Date(doc.createdAt), { addSuffix: true })}
+                    </p>
+                    {doc.type === 'csv' && doc.status === 'ready' && (
+                      <p className="text-[10px] text-brand-500 mt-0.5">
+                        {selectedCSV?.id === doc.id ? 'Click to hide analytics' : 'Click to view analytics'}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="flex items-center gap-1 text-xs text-gray-400 capitalize">
+                      {STATUS_ICONS[doc.status]}
+                      {doc.status}
+                    </span>
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteDocument(doc.id, doc.name); }}
+                      className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
