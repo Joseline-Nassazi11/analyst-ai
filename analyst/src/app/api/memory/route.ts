@@ -3,6 +3,7 @@ import { createServerSupabaseClient, createAdminClient } from '@/lib/db/supabase
 export async function GET(req: Request) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return Response.json({ memories: [] });
   const admin = createAdminClient();
   const { data } = await admin.from('user_memory').select('content, type, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
   return Response.json({ memories: data ?? [] });
