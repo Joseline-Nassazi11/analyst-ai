@@ -162,7 +162,7 @@ export const compareDocumentsTool = (userId: string, sessionId?: string) =>
   });
 
 export function getAgentTools(userId: string, sessionId?: string, activeTools?: Record<string, boolean>) {
-  const tools: Record<string, ReturnType<typeof tool>> = {};
+  const tools: Record<string, any> = {};
   if (activeTools?.ragSearch !== false) tools.ragSearch = ragSearchTool(userId, sessionId);
   if (activeTools?.webSearch !== false) tools.webSearch = webSearchTool(userId, sessionId);
   if (activeTools?.generateReport !== false) tools.generateReport = generateReportTool(userId, sessionId);
